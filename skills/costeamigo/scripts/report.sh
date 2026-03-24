@@ -11,6 +11,15 @@ INDEX_FILE="$COSTEA_DIR/task-index.json"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BUILD_INDEX="$SCRIPT_DIR/../../token-analysis/scripts/build-index.sh"
 
+# Parse arguments
+SOURCE_FILTER="all"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --source) SOURCE_FILTER="$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+
 if ! command -v jq &>/dev/null; then
   echo '{"error": "jq is required. Install with: brew install jq"}' >&2
   exit 1
@@ -32,8 +41,15 @@ if [[ "$task_count" -eq 0 ]]; then
   exit 0
 fi
 
+# Apply source filter: pre-filter tasks before aggregation
+FILTER_EXPR="."
+if [[ "$SOURCE_FILTER" != "all" ]]; then
+  FILTER_EXPR='.tasks |= [.[] | select(.source == "'"$SOURCE_FILTER"'")] | .task_count = (.tasks | length) | .total_tokens = ([.tasks[].token_usage.total] | add // 0) | .total_cost = ([.tasks[].cost.total] | add // 0)'
+fi
+
 # Generate the full multi-dimensional report in one jq pass
-jq '{
+jq "$FILTER_EXPR" "$INDEX_FILE" | jq --arg source_filter "$SOURCE_FILTER" '{
+  filter: $source_filter,
   overview: {
     total_tasks: .task_count,
     total_tokens: .total_tokens,
@@ -148,4 +164,4 @@ jq '{
       session_id: .session_id
     }]
   )
-}' "$INDEX_FILE"
+}'
