@@ -9,7 +9,7 @@ set -euo pipefail
 COSTEA_DIR="$HOME/.costea"
 INDEX_FILE="$COSTEA_DIR/task-index.json"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BUILD_INDEX="$SCRIPT_DIR/../../token-analysis/scripts/build-index.sh"
+BUILD_INDEX="$SCRIPT_DIR/../../costea/scripts/build-index.sh"
 
 # Parse arguments
 SOURCE_FILTER="all"
