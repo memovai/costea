@@ -146,9 +146,12 @@ scan_openclaw() {
 
   echo "Scanning OpenClaw sessions..." >&2
 
-  # Iterate session IDs from sessions.json
-  while IFS= read -r sid; do
+  # sessions.json keys are channel identifiers (e.g. "agent:main:main"),
+  # not session UUIDs. The actual sessionId is in .value.sessionId.
+  while IFS=$'\t' read -r sid jsonl_path; do
     [[ -z "$sid" ]] && continue
+    # sessionFile in sessions.json is the container-internal path;
+    # resolve to our local OPENCLAW_SESSIONS directory instead.
     local jsonl_file="$OPENCLAW_SESSIONS/${sid}.jsonl"
     [[ ! -f "$jsonl_file" ]] && continue
 
@@ -170,7 +173,7 @@ scan_openclaw() {
     }
     sessions_parsed=$((sessions_parsed + 1))
 
-  done < <(jq -r 'keys[]' "$sessions_json" 2>/dev/null)
+  done < <(jq -r '.[] | select(.sessionId != null) | [.sessionId, .sessionFile] | @tsv' "$sessions_json" 2>/dev/null)
 }
 
 # ── Run scans ─────────────────────────────────────────────────────────────────

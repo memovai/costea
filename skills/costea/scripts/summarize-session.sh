@@ -54,10 +54,11 @@ _summarize_one() {
 
   # ── Collect timestamps from session.jsonl ────────────────────────────────
   local started_at ended_at project_path source_platform
-  started_at=$(jq -r '[.timestamp] | first // "N/A"' "$dir/session.jsonl" 2>/dev/null | head -1 || echo "N/A")
-  ended_at=$(jq -r '.timestamp' "$dir/session.jsonl" 2>/dev/null | tail -1 || echo "N/A")
-  project_path=$(jq -r 'first | .cwd // ""' "$dir/session.jsonl" 2>/dev/null 2>/dev/null | head -1 || echo "")
-  source_platform=$(jq -r 'first | .source // "claude-code"' "$dir/session.jsonl" 2>/dev/null | head -1 || echo "claude-code")
+  # NDJSON: each line is a separate JSON object; use head/tail + jq on single lines
+  started_at=$(head -1 "$dir/session.jsonl" 2>/dev/null | jq -r '.timestamp // "N/A"' 2>/dev/null || echo "N/A")
+  ended_at=$(tail -1 "$dir/session.jsonl" 2>/dev/null | jq -r '.timestamp // "N/A"' 2>/dev/null || echo "N/A")
+  project_path=$(head -1 "$dir/session.jsonl" 2>/dev/null | jq -r '.cwd // ""' 2>/dev/null || echo "")
+  source_platform=$(head -1 "$dir/session.jsonl" 2>/dev/null | jq -r '.source // "claude-code"' 2>/dev/null || echo "claude-code")
 
   # Timestamps from llm-calls if session.jsonl empty
   if [[ "$started_at" == "N/A" || -z "$started_at" ]]; then
