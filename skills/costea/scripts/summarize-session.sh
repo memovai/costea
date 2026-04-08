@@ -65,7 +65,20 @@ _summarize_one() {
     ended_at=$(jq -r '.timestamp' "$dir/llm-calls.jsonl" 2>/dev/null | tail -1 || echo "N/A")
   fi
 
-  # ── Build summary in one jq pass over each JSONL file ────────────────────
+  # ── Pre-slurp JSONL files into temp JSON arrays ──────────────────────────
+  # Use temp files + --slurpfile instead of --argjson to avoid ARG_MAX
+  # overflow on large sessions (macOS default ~262144 bytes).
+  local _tmp_sessions _tmp_calls _tmp_tools _tmp_agents
+  _tmp_sessions=$(mktemp) _tmp_calls=$(mktemp) _tmp_tools=$(mktemp) _tmp_agents=$(mktemp)
+  # shellcheck disable=SC2064
+  trap "rm -f '$_tmp_sessions' '$_tmp_calls' '$_tmp_tools' '$_tmp_agents'" RETURN
+
+  jq -sc '.' "$dir/session.jsonl"   2>/dev/null > "$_tmp_sessions" || echo '[]' > "$_tmp_sessions"
+  jq -sc '.' "$dir/llm-calls.jsonl" 2>/dev/null > "$_tmp_calls"    || echo '[]' > "$_tmp_calls"
+  jq -sc '.' "$dir/tools.jsonl"     2>/dev/null > "$_tmp_tools"    || echo '[]' > "$_tmp_tools"
+  jq -sc '.' "$dir/agents.jsonl"    2>/dev/null > "$_tmp_agents"   || echo '[]' > "$_tmp_agents"
+
+  # ── Build summary in one jq pass ───────────────────────────────────────
   jq -n \
     --arg sid          "$sid"             \
     --arg source       "$source_platform" \
@@ -73,14 +86,20 @@ _summarize_one() {
     --arg started_at   "$started_at"      \
     --arg ended_at     "$ended_at"        \
     --arg now          "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-    --argjson sessions  "$(jq -sc '.' "$dir/session.jsonl"   2>/dev/null || echo '[]')" \
-    --argjson calls     "$(jq -sc '.' "$dir/llm-calls.jsonl" 2>/dev/null || echo '[]')" \
-    --argjson tools     "$(jq -sc '.' "$dir/tools.jsonl"     2>/dev/null || echo '[]')" \
-    --argjson agents    "$(jq -sc '.' "$dir/agents.jsonl"    2>/dev/null || echo '[]')" \
+    --slurpfile sessions_f "$_tmp_sessions" \
+    --slurpfile calls_f    "$_tmp_calls"    \
+    --slurpfile tools_f    "$_tmp_tools"    \
+    --slurpfile agents_f   "$_tmp_agents"   \
     '
     # ── helpers ────────────────────────────────────────────────────────────
     def r6: . * 1000000 | round / 1000000;
     def safeadd: if length == 0 then 0 else add // 0 end;
+
+    # --slurpfile wraps in an outer array; unwrap to get the actual arrays
+    ($sessions_f | first // []) as $sessions |
+    ($calls_f    | first // []) as $calls |
+    ($tools_f    | first // []) as $tools |
+    ($agents_f   | first // []) as $agents |
 
     # ── turn stats ─────────────────────────────────────────────────────────
     ($sessions | length) as $n_turns |
