@@ -96,12 +96,44 @@ scan_claude_code() {
               -not -path "*/subagents/*" 2>/dev/null | sort)
 }
 
-# ── Phase 2 stub: Codex CLI ───────────────────────────────────────────────────
-# (Full implementation in a future update; currently a no-op)
+# ── Codex CLI ─────────────────────────────────────────────────────────────────
 scan_codex() {
   [[ ! -d "$CODEX_SESSIONS" ]] && return
   [[ "$SOURCE_FILTER" != "all" && "$SOURCE_FILTER" != "codex" ]] && return
-  echo "  Codex CLI: full parsing coming in Phase 2 (stats available via build-index.sh)" >&2
+
+  echo "Scanning Codex CLI sessions..." >&2
+
+  while IFS= read -r jsonl_file; do
+    [[ ! -f "$jsonl_file" ]] && continue
+
+    # Extract session ID from session_meta or filename
+    local sid
+    sid=$(jq -r 'select(.type == "session_meta") | .payload.id // empty' "$jsonl_file" 2>/dev/null | head -1)
+    if [[ -z "$sid" ]]; then
+      local bn
+      bn=$(basename "$jsonl_file" .jsonl)
+      sid="codex-${bn##*-}"
+    fi
+
+    local session_dir="$SESSIONS_DIR/$sid"
+    if [[ "$FORCE" == false && -f "$session_dir/llm-calls.jsonl" ]]; then
+      if [[ "$jsonl_file" -ot "$session_dir/llm-calls.jsonl" ]]; then
+        sessions_skipped=$((sessions_skipped + 1))
+        continue
+      fi
+    fi
+
+    bash "$SCRIPT_DIR/parse-codex.sh" $FORCE_FLAG --file "$jsonl_file" || {
+      echo "    Warning: failed to parse codex $jsonl_file" >&2
+      continue
+    }
+    bash "$SCRIPT_DIR/summarize-session.sh" "$sid" || {
+      echo "    Warning: failed to summarize codex $sid" >&2
+      continue
+    }
+    sessions_parsed=$((sessions_parsed + 1))
+
+  done < <(find "$CODEX_SESSIONS" -name "rollout-*.jsonl" 2>/dev/null | sort)
 }
 
 # ── Phase 2 stub: OpenClaw ────────────────────────────────────────────────────
