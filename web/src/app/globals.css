@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5f0e8;
+  --foreground: #1a1a1a;
+  --muted: #8a8a8a;
+  --muted-light: #b0b0b0;
+  --surface: #ffffff;
+  --surface-warm: #eae8e0;
+  --border: #d0d0d0;
+  --accent: #1a1a1a;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-muted-light: var(--muted-light);
+  --color-surface: var(--surface);
+  --color-surface-warm: var(--surface-warm);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+}
+
+/* Receipt card shadow */
+.receipt-shadow {
+  box-shadow: 0 2px 20px rgba(0, 0, 0, 0.06);
+}
+
+/* Dashed separator matching receipt style */
+.receipt-dash {
+  border-top: 1px dashed var(--border);
+}
+
+/* Double line for totals */
+.receipt-double {
+  border-top: 2px double var(--foreground);
+}
+
+/* Monospace receipt text */
+.font-receipt {
+  font-family: 'Courier New', Courier, monospace;
+}
