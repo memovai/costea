@@ -31,14 +31,14 @@ Check `$ARGUMENTS`:
 Use AskUserQuestion with this format:
 
 ```
-选择要分析的平台：
+Choose a platform to analyze:
 
-A) all     — 全部平台汇总 (OpenClaw + Claude Code + Codex)
-B) openclaw — OpenClaw 会话
-C) claude   — Claude Code 会话
-D) codex    — Codex CLI 会话
+A) all     — Combined report (OpenClaw + Claude Code + Codex)
+B) openclaw — OpenClaw sessions
+C) claude   — Claude Code sessions
+D) codex    — Codex CLI sessions
 
-输入 A/B/C/D 或平台名称：
+Enter A/B/C/D or platform name:
 ```
 
 Map the user's response:
