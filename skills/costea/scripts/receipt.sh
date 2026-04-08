@@ -58,13 +58,14 @@ confidence=$(echo "$JSON"     | jq -r '.confidence // 0')
 timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
 # Providers array → lines of "name|cost"
-mapfile -t prov_lines < <(echo "$JSON" | jq -r '.providers[]? | "\(.name)|\(.cost)"')
+prov_lines=()
+while IFS= read -r _line; do
+  prov_lines+=("$_line")
+done < <(echo "$JSON" | jq -r '.providers[]? | "\(.name)|\(.cost)"')
 
 # ── Number formatting ─────────────────────────────────────────────────────────
 fmt_num() {
-  local n="$1"
-  # Insert commas for thousands
-  echo "$n" | sed -E ':a;s/([0-9])([0-9]{3})(,|$)/\1,\2\3/;ta'
+  printf "%'d" "$1" 2>/dev/null || echo "$1"
 }
 
 fmt_cost() {
@@ -81,18 +82,18 @@ fi
 W=50  # inner content width (between │ borders)
 
 # ── Drawing helpers ───────────────────────────────────────────────────────────
-line_top()    { printf '  ┌'; printf '─%.0s' $(seq 1 $W); printf '┐\n'; }
-line_bot()    { printf '  └'; printf '─%.0s' $(seq 1 $W); printf '┘\n'; }
-line_dash()   { printf '  │'; printf -- '╌%.0s' $(seq 1 $W); printf '│\n'; }
-line_double() { printf '  │'; printf '═%.0s' $(seq 1 $W); printf '│\n'; }
-blank()       { printf '  │%-*s│\n' $W ""; }
+line_top()    { printf '┌'; printf '─%.0s' $(seq 1 $W); printf '┐\n'; }
+line_bot()    { printf '└'; printf '─%.0s' $(seq 1 $W); printf '┘\n'; }
+line_dash()   { printf '│'; printf -- '╌%.0s' $(seq 1 $W); printf '│\n'; }
+line_double() { printf '│'; printf '═%.0s' $(seq 1 $W); printf '│\n'; }
+blank()       { printf '│%-*s│\n' $W ""; }
 
 center() {
   local text="$1"
   local len=${#text}
   local pad=$(( (W - len) / 2 ))
   local rpad=$(( W - len - pad ))
-  printf '  │%*s%s%*s│\n' "$pad" "" "$text" "$rpad" ""
+  printf '│%*s%s%*s│\n' "$pad" "" "$text" "$rpad" ""
 }
 
 # label (left-aligned, dim), value (right-aligned)
@@ -100,12 +101,12 @@ row() {
   local label="$1" value="$2"
   local gap=$(( W - 4 - ${#label} - ${#value} ))
   if [[ $gap -lt 1 ]]; then gap=1; fi
-  printf '  │  %s%*s%s  │\n' "$label" "$gap" "" "$value"
+  printf '│  %s%*s%s  │\n' "$label" "$gap" "" "$value"
 }
 
 # section header (left-aligned, small caps style)
 header() {
-  printf '  │  %-*s│\n' $((W - 2)) "$1"
+  printf '│  %-*s│\n' $((W - 2)) "$1"
 }
 
 # ── Render ────────────────────────────────────────────────────────────────────
@@ -119,7 +120,7 @@ blank
 line_dash
 blank
 header "TASK"
-printf '  │  %-*s│\n' $((W - 2)) "$task"
+printf '│  %-*s│\n' $((W - 2)) "$task"
 blank
 line_dash
 blank
@@ -151,7 +152,7 @@ row "$total_label" "$total_val"
 if [[ -n "$best" ]]; then
   best_text="best price: $best"
   local_pad=$(( W - 2 - ${#best_text} ))
-  printf '  │%*s%s  │\n' "$local_pad" "" "$best_text"
+  printf '│%*s%s  │\n' "$local_pad" "" "$best_text"
 fi
 
 blank
