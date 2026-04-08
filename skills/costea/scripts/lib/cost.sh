@@ -64,4 +64,17 @@ def mcost(m; i; o; r; w):
 def r6: . * 1000000 | round / 1000000;
 JQEOF
 
-export COSTEA_PRICES COSTEA_JQ_FUNS
+# ── Multi-provider comparison prices ──────────────────────────────────────────
+# Used by receipt.sh and estimate-cost.sh to show cost across providers.
+# Only input + output (no cache) — for "what if I used a different model" estimates.
+COSTEA_PROVIDERS='[
+  {"name": "Claude Sonnet 4.6",  "input": 3,    "output": 15},
+  {"name": "Claude Opus 4.6",    "input": 5,    "output": 25},
+  {"name": "Claude Haiku 4.5",   "input": 1,    "output": 5},
+  {"name": "GPT-5.4",            "input": 2.50, "output": 15},
+  {"name": "GPT-5.2 Codex",      "input": 1.07, "output": 8.50},
+  {"name": "Gemini 2.5 Pro",     "input": 1.25, "output": 5},
+  {"name": "Gemini 2.5 Flash",   "input": 0.15, "output": 0.60}
+]'
+
+export COSTEA_PRICES COSTEA_JQ_FUNS COSTEA_PROVIDERS
