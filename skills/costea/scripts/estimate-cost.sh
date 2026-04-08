@@ -3,11 +3,17 @@ set -euo pipefail
 
 # Costea: Estimate cost for a new task using historical task index
 # Uses the task index built by build-index.sh
-# Output: JSON with estimate data for the SKILL.md to present
+# Output: JSON with historical data + multi-provider price estimates
+#
+# The output is consumed by the /costea skill (SKILL.md), which
+# uses LLM reasoning to match similar tasks and build a receipt.
 
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COSTEA_DIR="$HOME/.costea"
 INDEX_FILE="$COSTEA_DIR/task-index.json"
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# Load shared price table (provides COSTEA_PROVIDERS)
+source "$SCRIPT_DIR/lib/cost.sh"
 
 TASK_DESC="${1:-}"
 
@@ -28,24 +34,30 @@ fi
 
 # If still no index, return empty
 if [[ ! -f "$INDEX_FILE" ]]; then
-  jq -n --arg task "$TASK_DESC" '{
-    task: $task,
-    has_history: false,
-    task_count: 0,
-    history_summary: "No historical task data available."
-  }'
+  jq -n --arg task "$TASK_DESC" \
+    --argjson providers "$COSTEA_PROVIDERS" \
+    '{
+      task: $task,
+      has_history: false,
+      task_count: 0,
+      history_summary: "No historical task data available.",
+      provider_prices: $providers
+    }'
   exit 0
 fi
 
 task_count=$(jq '.task_count // 0' "$INDEX_FILE")
 
 if [[ "$task_count" -eq 0 ]]; then
-  jq -n --arg task "$TASK_DESC" '{
-    task: $task,
-    has_history: false,
-    task_count: 0,
-    history_summary: "No historical task data available."
-  }'
+  jq -n --arg task "$TASK_DESC" \
+    --argjson providers "$COSTEA_PROVIDERS" \
+    '{
+      task: $task,
+      has_history: false,
+      task_count: 0,
+      history_summary: "No historical task data available.",
+      provider_prices: $providers
+    }'
   exit 0
 fi
 
@@ -74,11 +86,13 @@ jq -n \
   --arg task "$TASK_DESC" \
   --argjson task_count "$task_count" \
   --argjson history "$history_summary" \
+  --argjson providers "$COSTEA_PROVIDERS" \
   --arg built_at "$(jq -r '.built_at' "$INDEX_FILE")" \
   '{
     task: $task,
     has_history: true,
     task_count: $task_count,
     index_built_at: $built_at,
-    historical_tasks: $history
+    historical_tasks: $history,
+    provider_prices: $providers
   }'
