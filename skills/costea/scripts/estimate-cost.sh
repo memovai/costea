@@ -53,8 +53,11 @@ if [[ "$task_count" -eq 0 ]]; then
   exit 0
 fi
 
-# ── Historical tasks (compact for LLM) ────────────────────────────────────────
-history_summary=$(jq '[.tasks[] | {
+TMPDIR_COSTEA=$(mktemp -d)
+trap 'rm -rf "$TMPDIR_COSTEA"' EXIT
+
+# ── Historical tasks (compact for LLM, limit to 200 most recent) ──────────────
+jq '[.tasks[-200:] [] | {
   id: (.session_id[:8] + "/" + (.timestamp | split("T")[1][:8])),
   source: .source,
   prompt: (.user_prompt[:200]),
@@ -70,10 +73,10 @@ history_summary=$(jq '[.tasks[] | {
   tool_calls: .total_tool_calls,
   msgs: .assistant_message_count,
   reasoning_pct: (if .token_usage.total > 0 then (.reasoning.tokens / .token_usage.total * 100 | round) else 0 end)
-}]' "$INDEX_FILE")
+}]' "$INDEX_FILE" > "$TMPDIR_COSTEA/history.json"
 
 # ── Aggregate stats from task index (for LLM context) ─────────────────────────
-agg_stats=$(jq '{
+jq '{
   task_count: .task_count,
   total_tokens: .total_tokens,
   avg_tokens_per_task: (if .task_count > 0 then (.total_tokens / .task_count | round) else 0 end),
@@ -105,35 +108,40 @@ agg_stats=$(jq '{
       if length > 0 then (add / length | round) else 0 end
     )
   }
-}' "$INDEX_FILE")
+}' "$INDEX_FILE" > "$TMPDIR_COSTEA/agg.json"
 
 # ── Session-level stats (if available) ────────────────────────────────────────
-session_stats="null"
 if [[ -f "$SESSION_INDEX" ]]; then
-  session_stats=$(jq '{
+  jq '{
     session_count: .session_count,
     total_cost_usd: .total_cost_usd,
     avg_cost_per_session: (if .session_count > 0 then (.total_cost_usd / .session_count | . * 100 | round / 100) else 0 end),
     platforms: [.sources[] | "\(.source): \(.count)"]
-  }' "$SESSION_INDEX")
+  }' "$SESSION_INDEX" > "$TMPDIR_COSTEA/sess.json"
+else
+  echo 'null' > "$TMPDIR_COSTEA/sess.json"
 fi
+
+echo "$COSTEA_PROVIDERS" > "$TMPDIR_COSTEA/providers.json"
+
+built_at=$(jq -r '.built_at' "$INDEX_FILE")
 
 # ── Output ────────────────────────────────────────────────────────────────────
 jq -n \
   --arg task "$TASK_DESC" \
   --argjson task_count "$task_count" \
-  --argjson history "$history_summary" \
-  --argjson providers "$COSTEA_PROVIDERS" \
-  --argjson agg "$agg_stats" \
-  --argjson sess "$session_stats" \
-  --arg built_at "$(jq -r '.built_at' "$INDEX_FILE")" \
+  --slurpfile history "$TMPDIR_COSTEA/history.json" \
+  --slurpfile providers "$TMPDIR_COSTEA/providers.json" \
+  --slurpfile agg "$TMPDIR_COSTEA/agg.json" \
+  --slurpfile sess "$TMPDIR_COSTEA/sess.json" \
+  --arg built_at "$built_at" \
   '{
     task: $task,
     has_history: true,
     task_count: $task_count,
     index_built_at: $built_at,
-    historical_tasks: $history,
-    provider_prices: $providers,
-    aggregate_stats: $agg,
-    session_stats: $sess
+    historical_tasks: $history[0],
+    provider_prices: $providers[0],
+    aggregate_stats: $agg[0],
+    session_stats: $sess[0]
   }'
