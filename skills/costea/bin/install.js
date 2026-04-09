@@ -83,7 +83,7 @@ if (fs.existsSync(path.join(amigoSrc, 'SKILL.md'))) {
 }
 
 console.log('');
-console.log('  @asklv/costea installed!');
+console.log('  @costea/costea installed!');
 console.log('');
 for (const name of installed) {
   console.log(`   + ${name}`);

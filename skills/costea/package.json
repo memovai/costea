@@ -1,5 +1,5 @@
 {
-  "name": "@asklv/costea",
+  "name": "@costea/costea",
   "version": "1.0.0",
   "description": "Cost prediction for AI agents. Estimate token costs before execution, review spending after.",
   "author": {
@@ -24,7 +24,7 @@
     "skill"
   ],
   "bin": {
-    "costea": "./bin/install.js"
+    "costea-install": "./bin/install.js"
   },
   "files": [
     "SKILL.md",
