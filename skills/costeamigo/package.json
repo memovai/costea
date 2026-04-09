@@ -1,0 +1,39 @@
+{
+  "name": "@costea/costeamigo",
+  "version": "1.0.0",
+  "description": "Historical token consumption report across OpenClaw, Claude Code, and Codex CLI.",
+  "author": {
+    "name": "Costea",
+    "url": "https://github.com/memovai/costea"
+  },
+  "homepage": "https://github.com/memovai/costea",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/memovai/costea",
+    "directory": "skills/costeamigo"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "token-cost",
+    "cost-report",
+    "ai-agent",
+    "llm-observability",
+    "claude",
+    "codex",
+    "openclaw",
+    "skill"
+  ],
+  "files": [
+    "SKILL.md",
+    "scripts"
+  ],
+  "main": "SKILL.md",
+  "skills": ["SKILL.md"],
+  "claudePlugin": {
+    "skills": ["SKILL.md"],
+    "requirements": {
+      "tools": ["jq", "bash"],
+      "shell": "bash"
+    }
+  }
+}
