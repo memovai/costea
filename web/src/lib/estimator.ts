@@ -127,7 +127,10 @@ export async function estimateTask(taskDesc: string): Promise<EstimateResult> {
   // Load task index
   let taskIndex: TaskIndex | null = null;
   if (existsSync(TASK_INDEX)) {
-    taskIndex = JSON.parse(await readFile(TASK_INDEX, "utf-8"));
+    try {
+      const raw = await readFile(TASK_INDEX, "utf-8");
+      if (raw.trim()) taskIndex = JSON.parse(raw);
+    } catch { /* corrupted or empty file — treat as no index */ }
   }
 
   // Load session index for stats
