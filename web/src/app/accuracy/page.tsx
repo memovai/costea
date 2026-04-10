@@ -10,6 +10,7 @@ interface Estimate {
     task: string;
     input_tokens: number;
     output_tokens: number;
+    cache_read_tokens?: number;
     tool_calls: number;
     total_cost: number;
     confidence: number;
@@ -19,6 +20,7 @@ interface Estimate {
   actual: {
     input_tokens: number;
     output_tokens: number;
+    cache_read_tokens?: number;
     tool_calls: number;
     total_cost: number;
   } | null;
@@ -58,6 +60,7 @@ interface ScatterPoint {
   actual: number;
   task: string;
   error_pct: number;
+  extra?: { label: string; predicted: string; actual: string }[];
 }
 
 /** Interactive scatter plot with hover tooltip */
@@ -145,7 +148,7 @@ function InteractiveScatter({ data, xLabel, yLabel, formatVal }: {
             minWidth: "180px",
           }}
         >
-          <p className="font-sans font-medium text-[11px] mb-1 truncate max-w-[200px]">{hover.point.task}</p>
+          <p className="font-sans font-medium text-[11px] mb-1 truncate max-w-[220px]">{hover.point.task}</p>
           <div className="flex justify-between gap-4">
             <span className="text-surface/60">Predicted:</span>
             <span>{formatVal(hover.point.predicted)}</span>
@@ -156,8 +159,18 @@ function InteractiveScatter({ data, xLabel, yLabel, formatVal }: {
           </div>
           <div className="flex justify-between gap-4 border-t border-surface/20 mt-1 pt-1">
             <span className="text-surface/60">Error:</span>
-            <span className={hover.point.error_pct > 0 ? "" : ""}>{hover.point.error_pct > 0 ? "+" : ""}{hover.point.error_pct}%</span>
+            <span>{hover.point.error_pct > 0 ? "+" : ""}{hover.point.error_pct}%</span>
           </div>
+          {hover.point.extra && hover.point.extra.length > 0 && (
+            <div className="border-t border-surface/20 mt-1 pt-1 space-y-0.5">
+              {hover.point.extra.map((e, i) => (
+                <div key={i} className="flex justify-between gap-3 text-[9px]">
+                  <span className="text-surface/50">{e.label}:</span>
+                  <span>{e.predicted} → {e.actual}</span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -195,29 +208,59 @@ export default function AccuracyPage() {
   const { estimates, summary } = data;
   const completed = estimates.filter(e => e.status === "completed" && e.accuracy);
 
-  // Cost scatter data
+  // Cost scatter — tooltip shows input/output/cache breakdown
   const costData: ScatterPoint[] = completed.map(e => ({
     predicted: e.predicted.total_cost,
     actual: e.actual!.total_cost,
     task: e.predicted.task,
     error_pct: e.accuracy!.cost_error_pct ?? 0,
+    extra: [
+      { label: "Input", predicted: fmt(e.predicted.input_tokens), actual: fmt(e.actual!.input_tokens) },
+      { label: "Output", predicted: fmt(e.predicted.output_tokens), actual: fmt(e.actual!.output_tokens) },
+      { label: "Cache Read", predicted: fmt(e.predicted.cache_read_tokens || 0), actual: fmt(e.actual!.cache_read_tokens || 0) },
+    ],
   }));
 
-  // Input tokens scatter data
+  // Input tokens scatter — tooltip shows cache vs non-cache
   const inputData: ScatterPoint[] = completed.map(e => ({
     predicted: e.predicted.input_tokens,
     actual: e.actual!.input_tokens,
     task: e.predicted.task,
     error_pct: e.accuracy!.input_ratio ? Math.round(e.accuracy!.input_ratio - 100) : 0,
+    extra: [
+      { label: "Non-cache input", predicted: fmt(e.predicted.input_tokens), actual: fmt(e.actual!.input_tokens) },
+      { label: "Cache read", predicted: fmt(e.predicted.cache_read_tokens || 0), actual: fmt(e.actual!.cache_read_tokens || 0) },
+      { label: "Total (in+cache)", predicted: fmt(e.predicted.input_tokens + (e.predicted.cache_read_tokens || 0)), actual: fmt(e.actual!.input_tokens + (e.actual!.cache_read_tokens || 0)) },
+    ],
   }));
 
-  // Output tokens scatter data
+  // Output tokens scatter
   const outputData: ScatterPoint[] = completed.map(e => ({
     predicted: e.predicted.output_tokens,
     actual: e.actual!.output_tokens,
     task: e.predicted.task,
     error_pct: e.accuracy!.output_ratio ? Math.round(e.accuracy!.output_ratio - 100) : 0,
+    extra: [
+      { label: "Tools", predicted: String(e.predicted.tool_calls), actual: String(e.actual!.tool_calls) },
+    ],
   }));
+
+  // Total tokens scatter (input + output + cache)
+  const totalData: ScatterPoint[] = completed.map(e => {
+    const predTotal = e.predicted.input_tokens + e.predicted.output_tokens + (e.predicted.cache_read_tokens || 0);
+    const actTotal = e.actual!.input_tokens + e.actual!.output_tokens + (e.actual!.cache_read_tokens || 0);
+    return {
+      predicted: predTotal,
+      actual: actTotal,
+      task: e.predicted.task,
+      error_pct: predTotal > 0 ? Math.round((actTotal - predTotal) / predTotal * 100) : 0,
+      extra: [
+        { label: "Input", predicted: fmt(e.predicted.input_tokens), actual: fmt(e.actual!.input_tokens) },
+        { label: "Output", predicted: fmt(e.predicted.output_tokens), actual: fmt(e.actual!.output_tokens) },
+        { label: "Cache", predicted: fmt(e.predicted.cache_read_tokens || 0), actual: fmt(e.actual!.cache_read_tokens || 0) },
+      ],
+    };
+  });
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-12">
@@ -280,6 +323,12 @@ export default function AccuracyPage() {
         <div className="bg-surface receipt-shadow rounded p-6">
           <p className="text-xs text-muted uppercase tracking-wider mb-4">Predicted vs Actual Output Tokens</p>
           <InteractiveScatter data={outputData} xLabel="Predicted Output" yLabel="Actual Output" formatVal={fmt} />
+        </div>
+
+        {/* Total tokens scatter (input + output + cache) */}
+        <div className="bg-surface receipt-shadow rounded p-6">
+          <p className="text-xs text-muted uppercase tracking-wider mb-4">Predicted vs Actual Total Tokens (incl. cache)</p>
+          <InteractiveScatter data={totalData} xLabel="Predicted Total" yLabel="Actual Total" formatVal={fmt} />
         </div>
 
         {/* Error distribution */}
