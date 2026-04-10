@@ -112,6 +112,12 @@ export interface EstimateResult {
   total_cost: number;
   best_provider: string;
   confidence: number;
+  estimate_method: string;
+  fallback: {
+    recent_p90: { input: number; output: number; cache_read: number; tools: number; total: number } | null;
+    recent_task_count: number;
+    recent_days: number;
+  };
   stats: {
     total_sessions: number;
     total_historical_tasks: number;
@@ -176,12 +182,48 @@ export async function estimateTask(taskDesc: string): Promise<EstimateResult> {
     }
   }
 
-  // Compute estimate: weighted average of similar tasks, fallback to baseline
+  // ── Compute recent-history P90 fallback ─────────────────────────────────
+  // When no similar tasks match, use the user's own recent data (last 30 days)
+  // at P90 as a more realistic baseline than hardcoded numbers.
+  const FALLBACK_DAYS = 30;
+  let recentP90: { input: number; output: number; cache_read: number; tools: number; total: number } | null = null;
+  let recentTaskCount = 0;
+
+  if (taskIndex && taskIndex.tasks.length > 0) {
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - FALLBACK_DAYS);
+    const cutoffStr = cutoff.toISOString();
+
+    const recentTasks = taskIndex.tasks
+      .filter((t) => t.token_usage.total > 0 && (t.timestamp || "") >= cutoffStr);
+    recentTaskCount = recentTasks.length;
+
+    if (recentTasks.length >= 5) {
+      // Compute P90 for each dimension
+      const percentile = (arr: number[], p: number) => {
+        const sorted = [...arr].sort((a, b) => a - b);
+        const idx = Math.min(Math.floor(sorted.length * p), sorted.length - 1);
+        return sorted[idx];
+      };
+
+      recentP90 = {
+        input: percentile(recentTasks.map((t) => t.token_usage.input), 0.9),
+        output: percentile(recentTasks.map((t) => t.token_usage.output), 0.9),
+        cache_read: percentile(recentTasks.map((t) => t.token_usage.cache_read || 0), 0.9),
+        tools: percentile(recentTasks.map((t) => t.total_tool_calls), 0.9),
+        total: percentile(recentTasks.map((t) => t.token_usage.total), 0.9),
+      };
+    }
+  }
+
+  // ── Compute estimate ───────────────────────────────────────────────────
   let estInput: number, estOutput: number, estCacheRead: number, estTools: number, estRuntime: string;
   let confidence: number;
+  let estimateMethod: string;
 
   if (similarTasks.length >= 3) {
-    // Weighted average by similarity score
+    // Strategy A: Weighted average of top similar tasks
+    estimateMethod = "weighted_similar";
     const totalWeight = similarTasks.slice(0, 5).reduce((s, t) => s + t.similarity, 0);
     const top = similarTasks.slice(0, 5);
     estInput = Math.round(top.reduce((s, t) => s + t.input * t.similarity, 0) / totalWeight);
@@ -193,7 +235,8 @@ export async function estimateTask(taskDesc: string): Promise<EstimateResult> {
     estRuntime = estSeconds < 60 ? `~${estSeconds}s` : `~${Math.round(estSeconds / 60)} min`;
     confidence = Math.min(98, 70 + Math.min(similarTasks.length, 5) * 5 + Math.round(similarTasks[0].similarity * 0.1));
   } else if (similarTasks.length > 0) {
-    // Some matches: blend with baseline
+    // Strategy B: Blend best match with baseline
+    estimateMethod = "blend_match_baseline";
     const avg = similarTasks[0];
     estInput = Math.round((avg.input + baseline.input) / 2);
     estOutput = Math.round((avg.output + baseline.output) / 2);
@@ -201,8 +244,21 @@ export async function estimateTask(taskDesc: string): Promise<EstimateResult> {
     estTools = Math.round((avg.tool_calls + baseline.tools) / 2);
     estRuntime = baseline.runtime;
     confidence = 50 + similarTasks.length * 10;
+  } else if (recentP90) {
+    // Strategy C: No match — use recent P90 from user's own history
+    estimateMethod = `recent_p90_${FALLBACK_DAYS}d`;
+    estInput = recentP90.input;
+    estOutput = recentP90.output;
+    estCacheRead = recentP90.cache_read;
+    estTools = recentP90.tools;
+    const estTotalTokens = recentP90.total;
+    const estSeconds = Math.max(10, Math.round(estTotalTokens / 1200));
+    estRuntime = estSeconds < 60 ? `~${estSeconds}s` : `~${Math.round(estSeconds / 60)} min`;
+    // Slightly higher confidence than pure baseline since it's user's own data
+    confidence = 45;
   } else {
-    // Pure baseline
+    // Strategy D: Pure hardcoded baseline (no history at all)
+    estimateMethod = "hardcoded_baseline";
     estInput = baseline.input;
     estOutput = baseline.output;
     estCacheRead = 0;
@@ -265,6 +321,12 @@ export async function estimateTask(taskDesc: string): Promise<EstimateResult> {
     total_cost: sonnet.cost,
     best_provider: bestProvider.name,
     confidence,
+    estimate_method: estimateMethod,
+    fallback: {
+      recent_p90: recentP90,
+      recent_task_count: recentTaskCount,
+      recent_days: FALLBACK_DAYS,
+    },
     stats,
   };
 }
