@@ -4,7 +4,8 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License" /></a>
-  <a href="https://www.npmjs.com/package/@costea/costea"><img src="https://img.shields.io/npm/v/%40costea%2Fcostea?color=red" alt="npm" /></a>
+  <a href="https://www.npmjs.com/package/@costea/costea"><img src="https://img.shields.io/npm/v/%40costea%2Fcostea?color=red" alt="npm skill" /></a>
+  <a href="https://www.npmjs.com/package/@costea/web"><img src="https://img.shields.io/npm/v/%40costea%2Fweb?color=red&label=npm%20web" alt="npm web" /></a>
   <a href="https://github.com/memovai/costea"><img src="https://img.shields.io/badge/GitHub-costea-black" alt="GitHub" /></a>
 </p>
 
@@ -12,27 +13,95 @@
 
 ---
 
-## Quick Start
+## Install
+
+### Option A: npm (recommended)
 
 ```bash
+# Install CLI skills (/costea + /costeamigo)
 npx @costea/costea
+
+# Start Web UI dashboard
+npx @costea/web serve 3000
 ```
 
-Or install manually:
+> If your npm registry is private, add: `--registry https://registry.npmjs.org`
+
+### Option B: Git clone
 
 ```bash
-# Clone
 git clone https://github.com/memovai/costea.git
+cd costea
 
-# Symlink skills into Claude Code
-ln -sf $(pwd)/costea/skills/costea ~/.claude/skills/costea
-ln -sf $(pwd)/costea/skills/costeamigo ~/.claude/skills/costeamigo
+# Link skills into Claude Code
+ln -sf $(pwd)/skills/costea ~/.claude/skills/costea
+ln -sf $(pwd)/skills/costeamigo ~/.claude/skills/costeamigo
 
-# For Codex CLI
-ln -sf $(pwd)/costea/skills/costea ~/.codex/skills/costea
+# Link skills into Codex CLI
+ln -sf $(pwd)/skills/costea ~/.codex/skills/costea
+
+# Start Web UI
+cd web && npm install && npm run dev
 ```
 
-**Requires:** `jq` (`brew install jq`)
+### Requirements
+
+- **jq** — `brew install jq` (used by all shell scripts)
+- **Node.js 18+** — for Web UI only
+
+### First run — build the index
+
+After installing, build the session index from your history:
+
+```bash
+# Via installed skill scripts
+bash ~/.claude/skills/costea/scripts/update-index.sh
+
+# Or if cloned
+bash skills/costea/scripts/update-index.sh
+```
+
+This scans `~/.claude/projects/`, `~/.codex/sessions/`, and `~/.openclaw/` to build the task database.
+
+---
+
+## Usage
+
+### CLI Skills
+
+Open a new Claude Code or Codex session after installing:
+
+```bash
+# Estimate cost before running a task — shows receipt, asks Y/N
+/costea refactor the auth module
+
+# Historical spending report
+/costeamigo all        # All platforms combined
+/costeamigo claude     # Claude Code only
+/costeamigo codex      # Codex CLI only
+/costeamigo openclaw   # OpenClaw only
+```
+
+### Web UI
+
+```bash
+# Via npm
+npx @costea/web serve 3000
+
+# Or locally
+cd web && npm run dev
+```
+
+Open http://localhost:3000 — pages:
+
+| Page | What it shows |
+|------|--------------|
+| `/` | Landing page with receipt card, install commands |
+| `/dashboard` | All sessions, total cost, platform filter, sort by cost/tokens/date |
+| `/session/{id}` | Per-session detail: model breakdown, tools, turns (expandable with LLM call detail) |
+| `/estimate` | Interactive cost prediction — type a task, get live receipt |
+| `/analytics` | Cost over time, by-model/platform charts, daily breakdown |
+| `/accuracy` | Prediction vs actual comparison: scatter plot, error distribution, accuracy stats |
 
 ---
 
@@ -40,113 +109,62 @@ ln -sf $(pwd)/costea/skills/costea ~/.codex/skills/costea
 
 ### `/costea` — Cost Prediction Receipt
 
-Estimates the token cost of a task **before** you run it. Shows a terminal receipt with multi-provider comparison, then asks for confirmation.
-
-```
-/costea refactor the auth module
-```
+Estimates token cost **before** execution. Shows a terminal receipt with multi-provider comparison, then asks for Y/N confirmation. Logs predictions to `~/.costea/estimates.jsonl` and compares with actual usage after execution.
 
 ```
 ┌──────────────────────────────────────────────────┐
-│                                                  │
 │                  C O S T E A                     │
 │              Agent Cost Receipt                  │
-│             2026-04-08 14:32:07                  │
-│                                                  │
 │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-│                                                  │
 │  TASK                                            │
 │  Refactor the auth module                        │
-│                                                  │
 │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-│                                                  │
 │  Input tokens                        12,400      │
 │  Output tokens                        5,800      │
 │  Tool calls                              14      │
-│  Similar tasks matched                    3      │
-│  Est. runtime                        ~2 min      │
-│                                                  │
 │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-│                                                  │
 │  PROVIDER ESTIMATES                              │
 │  Claude Sonnet 4                        $0.38    │
 │  GPT-5.4                                $0.54    │
 │  Gemini 2.5 Pro                         $0.29    │
-│                                                  │
 │══════════════════════════════════════════════════│
-│                                                  │
 │  ESTIMATED TOTAL                        $0.38    │
-│                    best price: Gemini 2.5 Pro    │
-│                                                  │
-│╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-│                                                  │
 │  Confidence                              96%     │
-│                                                  │
 │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-│                                                  │
 │            Proceed? [Y/N]                        │
-│                                                  │
-│          POWERED BY /COSTEA SKILL                │
-│        THANK YOU FOR BEING COST-CONSCIOUS        │
-│                                                  │
-│       ║│║║│║│ ║║│║│║│║ ║║│║║│║│║│               │
-│                                                  │
 └──────────────────────────────────────────────────┘
 ```
 
 ### `/costeamigo` — Historical Spending Report
 
-Generates a multi-dimensional report of your token consumption across all platforms.
-
-```
-/costeamigo all        # Combined report
-/costeamigo claude     # Claude Code only
-/costeamigo codex      # Codex CLI only
-/costeamigo openclaw   # OpenClaw only
-```
-
-Reports include: per-platform breakdown, per-model costs, per-skill aggregation, tool usage patterns, reasoning vs tool-invocation split, and top expensive tasks.
+Multi-dimensional analysis: per-platform, per-model, per-skill, tool patterns, reasoning vs tool split, top expensive tasks.
 
 ---
 
 ## How It Works
 
 ```
-Session JSONL files (3 platforms)
-        │
-        ├── Claude Code   ~/.claude/projects/{proj}/{uuid}.jsonl
-        ├── Codex CLI     ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl
-        └── OpenClaw      ~/.openclaw/agents/main/sessions/*.jsonl
-                │
-                ▼
-  ┌─────────────────────────────────────┐
-  │  parse-claudecode.sh                │
-  │  parse-codex.sh        (per file)   │
-  │  parse-openclaw.sh                  │
-  └─────────────────────────────────────┘
-                │
-                ▼
-  ~/.costea/sessions/{id}/
-    session.jsonl       per-turn summary
-    llm-calls.jsonl     per-API-call (deduped)
-    tools.jsonl         per-tool invocation
-    agents.jsonl        subagent events
-    summary.json        aggregated stats
-                │
-                ▼
-  ┌─────────────┬──────────────┐
-  │             │              │
-  /costea     /costeamigo    index.json
-  receipt +   historical     global
-  Y/N         report         session index
+Session JSONL (3 platforms)
+      ↓  parse-claudecode.sh / parse-codex.sh / parse-openclaw.sh
+~/.costea/sessions/{id}/
+  session.jsonl · llm-calls.jsonl · tools.jsonl · agents.jsonl
+      ↓  summarize-session.sh
+summary.json → index.json
+      ↓
+  ┌───────┬──────────┬────────────┐
+  ↓       ↓          ↓            ↓
+/costea  /costeamigo  Web UI    estimates.jsonl
+receipt  report       dashboard  prediction tracking
++ Y/N                analytics  accuracy comparison
 ```
 
 ### Key Design
 
-- **Parallel tool-call dedup** — Claude Code splits one API response into multiple assistant records for parallel tool calls, sharing the same `message.id`. Only the first is counted for tokens.
-- **Cumulative delta** — Codex CLI stores running totals; per-turn usage is computed as `current - previous`.
-- **Native cost** — OpenClaw provides per-message USD cost directly; no local calculation needed.
-- **Subagent attribution** — Claude Code subagent files in `subagents/agent-*.jsonl` are scanned and attributed back to the parent session.
+- **Parallel tool-call dedup** — Claude Code splits one API response into multiple records sharing `message.id`. Only the first is counted.
+- **Cumulative delta** — Codex CLI stores running totals; per-turn usage = `current - previous`.
+- **Native cost** — OpenClaw provides per-message USD cost directly.
+- **Subagent attribution** — Claude Code `subagents/agent-*.jsonl` scanned and attributed to parent session.
+- **Prediction tracking** — Each `/costea` estimate is logged; actual usage is compared after execution.
 
 ---
 
@@ -154,61 +172,54 @@ Session JSONL files (3 platforms)
 
 | Platform | Parser | Token Source | Status |
 |----------|--------|-------------|--------|
-| Claude Code | `parse-claudecode.sh` | `message.usage` per assistant msg | Tested (106 sessions) |
-| Codex CLI | `parse-codex.sh` | Cumulative `token_count` events | Tested (80 sessions) |
-| OpenClaw | `parse-openclaw.sh` | `message.usage` with cost | Tested (real containers) |
+| Claude Code | `parse-claudecode.sh` | `message.usage` per assistant msg | Tested |
+| Codex CLI | `parse-codex.sh` | Cumulative `token_count` events | Tested |
+| OpenClaw | `parse-openclaw.sh` | `message.usage` with cost | Tested |
 
 ---
 
-## Provider Price Comparison
+## npm Packages
 
-The receipt shows estimated costs across multiple providers for the same task:
-
-| Provider | Input ($/M) | Output ($/M) |
-|----------|------------|-------------|
-| Claude Opus 4.6 | $5 | $25 |
-| Claude Sonnet 4.6 | $3 | $15 |
-| Claude Haiku 4.5 | $1 | $5 |
-| GPT-5.4 | $2.50 | $15 |
-| GPT-5.2 Codex | $1.07 | $8.50 |
-| Gemini 2.5 Pro | $1.25 | $5 |
-| Gemini 2.5 Flash | $0.15 | $0.60 |
-
-Prices sourced from `claude-code/src/utils/modelCost.ts` and provider documentation.
+| Package | Version | Purpose | Install |
+|---------|---------|---------|---------|
+| `@costea/costea` | 1.1.0 | CLI skills (SKILL.md + scripts) | `npx @costea/costea` |
+| `@costea/web` | 1.0.0 | Web UI (standalone Next.js) | `npx @costea/web serve [port]` |
 
 ---
 
-## Scripts
+## Scripts Reference
 
 | Script | Purpose |
 |--------|---------|
-| `parse-claudecode.sh` | Parse Claude Code session JSONL (dedup + subagents) |
+| `parse-claudecode.sh` | Parse Claude Code JSONL (dedup + subagents) |
 | `parse-codex.sh` | Parse Codex CLI rollout JSONL (cumulative deltas) |
-| `parse-openclaw.sh` | Parse OpenClaw session JSONL (native cost) |
+| `parse-openclaw.sh` | Parse OpenClaw JSONL (native cost) |
 | `build-index.sh` | Build task index from all platforms |
-| `estimate-cost.sh` | Retrieve historical data for cost prediction |
+| `estimate-cost.sh` | Historical data + aggregate stats for prediction |
 | `receipt.sh` | Render terminal receipt from JSON |
+| `log-estimate.sh` | Log predictions + actuals for accuracy tracking |
 | `summarize-session.sh` | Generate summary.json from session JSONL |
-| `update-index.sh` | Orchestrate full scan + rebuild index |
+| `update-index.sh` | Full scan + rebuild index |
+| `test-all.sh` | Run regression test suite (9 tests) |
 | `lib/cost.sh` | Shared price table and jq helpers |
 
 ---
 
 ## Data Directory
 
-All parsed data lives under `~/.costea/` and can be safely deleted and regenerated:
+All data under `~/.costea/` — safe to delete and regenerate:
 
 ```
 ~/.costea/
-├── sessions/
-│   └── {session-uuid}/
-│       ├── session.jsonl
-│       ├── llm-calls.jsonl
-│       ├── tools.jsonl
-│       ├── agents.jsonl
-│       └── summary.json
-├── task-index.json
-└── index.json
+├── sessions/{uuid}/
+│   ├── session.jsonl      per-turn summaries
+│   ├── llm-calls.jsonl    per-API-call records (deduped)
+│   ├── tools.jsonl        per-tool invocation
+│   ├── agents.jsonl       subagent lifecycle events
+│   └── summary.json       aggregated session stats
+├── task-index.json        task index (build-index.sh)
+├── index.json             session index (update-index.sh)
+└── estimates.jsonl        prediction log (log-estimate.sh)
 ```
 
 ---
