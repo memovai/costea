@@ -37,6 +37,9 @@ function Nav() {
         <Link href="/analytics" className="hover:text-muted transition-colors">
           Analytics
         </Link>
+        <Link href="/accuracy" className="hover:text-muted transition-colors">
+          Accuracy
+        </Link>
         <a
           href="https://github.com/memovai/costea"
           target="_blank"
