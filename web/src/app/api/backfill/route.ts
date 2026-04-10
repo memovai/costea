@@ -133,20 +133,38 @@ export async function POST() {
       continue;
     }
 
-    // Extract real usage with message.id dedup
+    // Extract real usage with message.id dedup.
+    // IMPORTANT: Only count messages for THIS task, not the entire rest of session.
+    // Task boundary = from estimate timestamp until the NEXT user string message
+    // (which starts the next task/turn).
     const content = await readFile(bestFile, "utf-8");
     const lines = content.split("\n").filter(l => l.trim());
     const seenIds = new Set<string>();
     let totalInput = 0, totalOutput = 0, totalCacheRead = 0, totalCacheWrite = 0, toolCalls = 0;
     let model = "unknown";
+    let passedEstimate = false;
+    let foundFirstAssistant = false;
 
     for (const line of lines) {
       try {
         const msg: SessionMsg = JSON.parse(line);
-        if (msg.type !== "assistant" || !msg.message?.usage) continue;
-        if ((msg.timestamp || "") <= est.timestamp) continue;
+        const ts = msg.timestamp || "";
 
-        const msgId = msg.message.id || `_noid_${msg.timestamp}`;
+        // Skip everything before the estimate
+        if (ts <= est.timestamp) continue;
+        passedEstimate = true;
+
+        // If we already found assistant messages and hit a new user string message,
+        // that's the start of the NEXT task — stop here
+        if (foundFirstAssistant && msg.type === "user") {
+          const userContent = (msg as unknown as { message?: { content?: unknown } }).message?.content;
+          if (typeof userContent === "string") break; // Next user turn = task boundary
+        }
+
+        if (msg.type !== "assistant" || !msg.message?.usage) continue;
+        foundFirstAssistant = true;
+
+        const msgId = msg.message.id || `_noid_${ts}`;
         if (seenIds.has(msgId)) continue; // dedup parallel tool calls
         seenIds.add(msgId);
 

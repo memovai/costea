@@ -97,18 +97,31 @@ while IFS= read -r estimate; do
 
   echo "  Found session: $(basename "$BEST_FILE" .jsonl) ($BEST_COUNT messages after estimate)" >&2
 
-  # Extract real usage: sum all assistant messages AFTER the estimate timestamp
-  # Use message.id dedup (same as parse-claudecode.sh) to handle parallel tool calls
+  # Extract real usage for THIS TASK ONLY (not entire rest of session).
+  # Task boundary: from estimate timestamp until the next user string message.
+  # Uses message.id dedup for parallel tool calls.
   ACTUAL=$(jq -sc --arg ts "$EST_TS" --argjson prices "$COSTEA_PRICES" '
-    [.[] | select(.type == "assistant" and .message.usage != null and (.timestamp // "") > $ts)] |
+    # First: find task boundary (next user string message after first assistant)
+    (reduce .[] as $m (
+      {passed: false, found_asst: false, boundary: null};
+      if .boundary != null then . # already found boundary
+      elif ($m.timestamp // "") <= $ts then . # before estimate
+      elif ($m.type == "assistant" and ($m.message.usage // null) != null) then .found_asst = true
+      elif (.found_asst and $m.type == "user" and ($m.message.content | type) == "string") then .boundary = $m.timestamp
+      else . end
+    ) | .boundary) as $boundary_ts |
+
+    # Collect assistant messages between estimate and boundary
+    [.[] | select(
+      .type == "assistant" and .message.usage != null and
+      (.timestamp // "") > $ts and
+      (if $boundary_ts then (.timestamp // "") < $boundary_ts else true end)
+    )] |
 
     # Dedup by message.id
     group_by(.message.id // ("_noid_" + (.timestamp // ""))) |
     map(.[0]) |
 
-    # Find the next user string message after estimate = task boundary
-    # For now, sum ALL messages after estimate until end of file
-    # (conservative: may over-count if user sent more messages)
     {
       input_tokens: ([.[].message.usage.input_tokens // 0] | add // 0),
       output_tokens: ([.[].message.usage.output_tokens // 0] | add // 0),

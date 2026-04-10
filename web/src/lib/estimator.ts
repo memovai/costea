@@ -16,13 +16,13 @@ const TASK_INDEX = path.join(COSTEA_DIR, "task-index.json");
 
 /** Multi-provider prices (USD per million tokens) */
 const PROVIDERS = [
-  { name: "Claude Sonnet 4.6", input: 3, output: 15 },
-  { name: "Claude Opus 4.6", input: 5, output: 25 },
-  { name: "Claude Haiku 4.5", input: 1, output: 5 },
-  { name: "GPT-5.4", input: 2.5, output: 15 },
-  { name: "GPT-5.2 Codex", input: 1.07, output: 8.5 },
-  { name: "Gemini 2.5 Pro", input: 1.25, output: 5 },
-  { name: "Gemini 2.5 Flash", input: 0.15, output: 0.6 },
+  { name: "Claude Sonnet 4.6", input: 3, output: 15, cache_read: 0.30 },
+  { name: "Claude Opus 4.6", input: 5, output: 25, cache_read: 0.50 },
+  { name: "Claude Haiku 4.5", input: 1, output: 5, cache_read: 0.10 },
+  { name: "GPT-5.4", input: 2.5, output: 15, cache_read: 0 },
+  { name: "GPT-5.2 Codex", input: 1.07, output: 8.5, cache_read: 0 },
+  { name: "Gemini 2.5 Pro", input: 1.25, output: 5, cache_read: 0 },
+  { name: "Gemini 2.5 Flash", input: 0.15, output: 0.6, cache_read: 0 },
 ];
 
 interface TaskRecord {
@@ -271,10 +271,10 @@ export async function estimateTask(taskDesc: string): Promise<EstimateResult> {
     ? Math.round((estCacheRead / (estInput + estOutput + estCacheRead)) * 100)
     : 0;
 
-  // Multi-provider pricing
+  // Multi-provider pricing (includes cache_read cost for Claude models)
   const providerCosts = PROVIDERS.map((p) => ({
     name: p.name,
-    cost: Math.round(((estInput * p.input + estOutput * p.output) / 1_000_000) * 10000) / 10000,
+    cost: Math.round(((estInput * p.input + estOutput * p.output + estCacheRead * p.cache_read) / 1_000_000) * 10000) / 10000,
   })).sort((a, b) => a.cost - b.cost);
 
   const bestProvider = providerCosts[0];
