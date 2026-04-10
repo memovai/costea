@@ -191,20 +191,24 @@ echo "Rebuilding ~/.costea/index.json..." >&2
 summaries="[]"
 while IFS= read -r summary_file; do
   [[ ! -f "$summary_file" ]] && continue
-  entry=$(jq -c '{
-    session_id:      .session_id,
-    source:          .source,
-    project_path:    .project_path,
-    started_at:      .started_at,
-    ended_at:        .ended_at,
-    turn_count:      .turn_count,
-    llm_call_count:  .llm_call_count,
-    tool_call_count: .tool_call_count,
-    total_tokens:    .token_usage.grand_total,
-    total_cost_usd:  .cost.total_usd,
-    subagent_count:  .subagents.count,
-    summary_path:    ("sessions/" + .session_id + "/summary.json")
-  }' "$summary_file" 2>/dev/null) || continue
+  # Skip empty sessions (no source, no tokens, no calls)
+  entry=$(jq -c '
+    select(.source != "" and .source != null and (.llm_call_count // 0) > 0) |
+    {
+      session_id:      .session_id,
+      source:          .source,
+      project_path:    .project_path,
+      started_at:      .started_at,
+      ended_at:        .ended_at,
+      turn_count:      .turn_count,
+      llm_call_count:  .llm_call_count,
+      tool_call_count: .tool_call_count,
+      total_tokens:    .token_usage.grand_total,
+      total_cost_usd:  .cost.total_usd,
+      subagent_count:  .subagents.count,
+      summary_path:    ("sessions/" + .session_id + "/summary.json")
+    }' "$summary_file" 2>/dev/null) || continue
+  [[ -z "$entry" ]] && continue
   summaries=$(printf '%s\n%s' "$summaries" "$entry" | jq -sc '.[0] + [.[1:][]]')
 done < <(find "$SESSIONS_DIR" -maxdepth 2 -name "summary.json" 2>/dev/null | sort)
 
