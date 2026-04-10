@@ -1,8 +1,4 @@
 <p align="center">
-  <img src="docs/images/mascot.png" alt="Costea Owl" width="180" />
-</p>
-
-<p align="center">
   <img src="docs/images/banner.svg" alt="Costea — cost prediction for AI agents" width="800" />
 </p>
 
