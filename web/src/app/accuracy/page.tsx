@@ -53,46 +53,116 @@ function pctColor(pct: number | null): string {
   return "text-red-700";
 }
 
-/** SVG scatter plot: predicted cost (x) vs actual cost (y) */
-function ScatterPlot({ data }: { data: { predicted: number; actual: number; task: string }[] }) {
+interface ScatterPoint {
+  predicted: number;
+  actual: number;
+  task: string;
+  error_pct: number;
+}
+
+/** Interactive scatter plot with hover tooltip */
+function InteractiveScatter({ data, xLabel, yLabel, formatVal }: {
+  data: ScatterPoint[];
+  xLabel: string;
+  yLabel: string;
+  formatVal: (n: number) => string;
+}) {
+  const [hover, setHover] = useState<{ point: ScatterPoint; x: number; y: number } | null>(null);
+
   if (data.length === 0) return <p className="text-xs text-muted">No completed estimates yet.</p>;
 
-  const W = 400, H = 300, P = 50;
-  const maxVal = Math.max(...data.map(d => Math.max(d.predicted, d.actual)), 0.01) * 1.1;
+  const W = 420, H = 320, P = 55;
+  const maxVal = Math.max(...data.map(d => Math.max(d.predicted, d.actual)), 0.01) * 1.15;
 
   const toX = (v: number) => P + (v / maxVal) * (W - 2 * P);
   const toY = (v: number) => H - P - (v / maxVal) * (H - 2 * P);
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-[500px]" preserveAspectRatio="xMidYMid meet">
-      {/* Grid */}
-      {[0, 0.25, 0.5, 0.75, 1].map(pct => {
-        const val = maxVal * pct;
-        const x = toX(val), y = toY(val);
-        return (
-          <g key={pct}>
-            <line x1={P} y1={y} x2={W - P} y2={y} stroke="var(--border)" strokeWidth="0.5" />
-            <line x1={x} y1={P} x2={x} y2={H - P} stroke="var(--border)" strokeWidth="0.5" />
-            <text x={P - 4} y={y + 3} textAnchor="end" fontSize="8" fill="var(--muted)">{fmtCost(val)}</text>
-            <text x={x} y={H - P + 12} textAnchor="middle" fontSize="8" fill="var(--muted)">{fmtCost(val)}</text>
-          </g>
-        );
-      })}
+    <div className="relative">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="w-full"
+        preserveAspectRatio="xMidYMid meet"
+        onMouseLeave={() => setHover(null)}
+      >
+        {/* Grid */}
+        {[0, 0.25, 0.5, 0.75, 1].map(pct => {
+          const val = maxVal * pct;
+          const x = toX(val), y = toY(val);
+          return (
+            <g key={pct}>
+              <line x1={P} y1={y} x2={W - P} y2={y} stroke="var(--border)" strokeWidth="0.5" />
+              <line x1={x} y1={P} x2={x} y2={H - P} stroke="var(--border)" strokeWidth="0.5" />
+              <text x={P - 4} y={y + 3} textAnchor="end" fontSize="8" fill="var(--muted)">{formatVal(val)}</text>
+              <text x={x} y={H - P + 12} textAnchor="middle" fontSize="8" fill="var(--muted)">{formatVal(val)}</text>
+            </g>
+          );
+        })}
 
-      {/* Perfect prediction line (y = x) */}
-      <line x1={toX(0)} y1={toY(0)} x2={toX(maxVal)} y2={toY(maxVal)} stroke="var(--foreground)" strokeWidth="1" strokeDasharray="4,3" opacity="0.3" />
+        {/* Perfect prediction line (y = x) */}
+        <line x1={toX(0)} y1={toY(0)} x2={toX(maxVal)} y2={toY(maxVal)}
+          stroke="var(--foreground)" strokeWidth="1" strokeDasharray="4,3" opacity="0.3" />
 
-      {/* Data points */}
-      {data.map((d, i) => (
-        <circle key={i} cx={toX(d.predicted)} cy={toY(d.actual)} r="4" fill="var(--foreground)" opacity="0.7">
-          <title>{`${d.task.slice(0, 40)}\nPredicted: ${fmtCost(d.predicted)}\nActual: ${fmtCost(d.actual)}`}</title>
-        </circle>
-      ))}
+        {/* Data points — interactive */}
+        {data.map((d, i) => {
+          const cx = toX(d.predicted), cy = toY(d.actual);
+          const isHovered = hover?.point === d;
+          return (
+            <g key={i}>
+              {/* Invisible larger hit area */}
+              <circle cx={cx} cy={cy} r="12" fill="transparent"
+                onMouseEnter={() => setHover({ point: d, x: cx, y: cy })}
+              />
+              {/* Visible dot */}
+              <circle cx={cx} cy={cy} r={isHovered ? 6 : 4}
+                fill="var(--foreground)" opacity={isHovered ? 1 : 0.6}
+                style={{ transition: "r 0.1s, opacity 0.1s" }}
+              />
+              {/* Crosshair on hover */}
+              {isHovered && (
+                <>
+                  <line x1={cx} y1={P} x2={cx} y2={H - P} stroke="var(--foreground)" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.3" />
+                  <line x1={P} y1={cy} x2={W - P} y2={cy} stroke="var(--foreground)" strokeWidth="0.5" strokeDasharray="2,2" opacity="0.3" />
+                </>
+              )}
+            </g>
+          );
+        })}
 
-      {/* Axis labels */}
-      <text x={W / 2} y={H - 5} textAnchor="middle" fontSize="9" fill="var(--muted)">Predicted Cost</text>
-      <text x={12} y={H / 2} textAnchor="middle" fontSize="9" fill="var(--muted)" transform={`rotate(-90, 12, ${H / 2})`}>Actual Cost</text>
-    </svg>
+        {/* Axis labels */}
+        <text x={W / 2} y={H - 5} textAnchor="middle" fontSize="9" fill="var(--muted)">{xLabel}</text>
+        <text x={12} y={H / 2} textAnchor="middle" fontSize="9" fill="var(--muted)" transform={`rotate(-90, 12, ${H / 2})`}>{yLabel}</text>
+      </svg>
+
+      {/* Tooltip overlay */}
+      {hover && (
+        <div
+          className="absolute pointer-events-none bg-foreground text-surface rounded px-3 py-2 text-[10px] font-mono shadow-lg z-10"
+          style={{
+            left: `${(hover.x / W) * 100}%`,
+            top: `${(hover.y / H) * 100 - 15}%`,
+            transform: "translate(-50%, -100%)",
+            minWidth: "180px",
+          }}
+        >
+          <p className="font-sans font-medium text-[11px] mb-1 truncate max-w-[200px]">{hover.point.task}</p>
+          <div className="flex justify-between gap-4">
+            <span className="text-surface/60">Predicted:</span>
+            <span>{formatVal(hover.point.predicted)}</span>
+          </div>
+          <div className="flex justify-between gap-4">
+            <span className="text-surface/60">Actual:</span>
+            <span>{formatVal(hover.point.actual)}</span>
+          </div>
+          <div className="flex justify-between gap-4 border-t border-surface/20 mt-1 pt-1">
+            <span className="text-surface/60">Error:</span>
+            <span className={hover.point.error_pct > 0 ? "" : ""}>{hover.point.error_pct > 0 ? "+" : ""}{hover.point.error_pct}%</span>
+          </div>
+        </div>
+      )}
+
+      <p className="text-[10px] text-muted mt-2">Dashed line = perfect prediction. Hover over points for details.</p>
+    </div>
   );
 }
 
@@ -107,17 +177,36 @@ export default function AccuracyPage() {
 
   const { estimates, summary } = data;
   const completed = estimates.filter(e => e.status === "completed" && e.accuracy);
-  const scatterData = completed.map(e => ({
+
+  // Cost scatter data
+  const costData: ScatterPoint[] = completed.map(e => ({
     predicted: e.predicted.total_cost,
     actual: e.actual!.total_cost,
     task: e.predicted.task,
+    error_pct: e.accuracy!.cost_error_pct ?? 0,
+  }));
+
+  // Input tokens scatter data
+  const inputData: ScatterPoint[] = completed.map(e => ({
+    predicted: e.predicted.input_tokens,
+    actual: e.actual!.input_tokens,
+    task: e.predicted.task,
+    error_pct: e.accuracy!.input_ratio ? Math.round(e.accuracy!.input_ratio - 100) : 0,
+  }));
+
+  // Output tokens scatter data
+  const outputData: ScatterPoint[] = completed.map(e => ({
+    predicted: e.predicted.output_tokens,
+    actual: e.actual!.output_tokens,
+    task: e.predicted.task,
+    error_pct: e.accuracy!.output_ratio ? Math.round(e.accuracy!.output_ratio - 100) : 0,
   }));
 
   return (
     <div className="max-w-6xl mx-auto px-6 py-12">
       <h1 className="text-3xl font-bold mb-2">Prediction Accuracy</h1>
       <p className="text-sm text-muted mb-10">
-        How well /costea predicts actual token costs.
+        How well /costea predicts actual token costs. Hover over chart points for details.
       </p>
 
       {/* Summary stats */}
@@ -144,12 +233,24 @@ export default function AccuracyPage() {
         </div>
       </div>
 
+      {/* Charts grid — 3 scatter plots + error distribution */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 mb-10">
-        {/* Scatter plot */}
+        {/* Cost scatter */}
         <div className="bg-surface receipt-shadow rounded p-6">
           <p className="text-xs text-muted uppercase tracking-wider mb-4">Predicted vs Actual Cost</p>
-          <ScatterPlot data={scatterData} />
-          <p className="text-[10px] text-muted mt-2">Dashed line = perfect prediction. Points above = under-estimated, below = over-estimated.</p>
+          <InteractiveScatter data={costData} xLabel="Predicted Cost" yLabel="Actual Cost" formatVal={fmtCost} />
+        </div>
+
+        {/* Input tokens scatter */}
+        <div className="bg-surface receipt-shadow rounded p-6">
+          <p className="text-xs text-muted uppercase tracking-wider mb-4">Predicted vs Actual Input Tokens</p>
+          <InteractiveScatter data={inputData} xLabel="Predicted Input" yLabel="Actual Input" formatVal={fmt} />
+        </div>
+
+        {/* Output tokens scatter */}
+        <div className="bg-surface receipt-shadow rounded p-6">
+          <p className="text-xs text-muted uppercase tracking-wider mb-4">Predicted vs Actual Output Tokens</p>
+          <InteractiveScatter data={outputData} xLabel="Predicted Output" yLabel="Actual Output" formatVal={fmt} />
         </div>
 
         {/* Error distribution */}
@@ -197,24 +298,32 @@ export default function AccuracyPage() {
           <table className="w-full text-xs">
             <thead>
               <tr className="border-b border-border text-left text-muted">
-                <th className="pb-2 pr-4">Task</th>
-                <th className="pb-2 pr-4">Method</th>
-                <th className="pb-2 pr-4">Conf.</th>
-                <th className="pb-2 pr-4">Est. Cost</th>
-                <th className="pb-2 pr-4">Actual Cost</th>
-                <th className="pb-2 pr-4">Error</th>
+                <th className="pb-2 pr-3">Task</th>
+                <th className="pb-2 pr-3">Method</th>
+                <th className="pb-2 pr-3">Conf.</th>
+                <th className="pb-2 pr-3">Est. Cost</th>
+                <th className="pb-2 pr-3">Act. Cost</th>
+                <th className="pb-2 pr-3">Est. In</th>
+                <th className="pb-2 pr-3">Act. In</th>
+                <th className="pb-2 pr-3">Est. Out</th>
+                <th className="pb-2 pr-3">Act. Out</th>
+                <th className="pb-2 pr-3">Error</th>
                 <th className="pb-2">Status</th>
               </tr>
             </thead>
             <tbody>
               {estimates.slice(0, 50).map(e => (
                 <tr key={e.estimate_id} className="border-b border-border/30">
-                  <td className="py-2 pr-4 truncate max-w-[200px]">{e.predicted.task}</td>
-                  <td className="py-2 pr-4 font-mono">{e.predicted.estimate_method}</td>
-                  <td className="py-2 pr-4 font-mono">{e.predicted.confidence}%</td>
-                  <td className="py-2 pr-4 font-mono">{fmtCost(e.predicted.total_cost)}</td>
-                  <td className="py-2 pr-4 font-mono">{e.actual ? fmtCost(e.actual.total_cost) : "—"}</td>
-                  <td className={`py-2 pr-4 font-mono font-medium ${pctColor(e.accuracy?.cost_error_pct ?? null)}`}>
+                  <td className="py-2 pr-3 truncate max-w-[150px]">{e.predicted.task}</td>
+                  <td className="py-2 pr-3 font-mono">{e.predicted.estimate_method}</td>
+                  <td className="py-2 pr-3 font-mono">{e.predicted.confidence}%</td>
+                  <td className="py-2 pr-3 font-mono">{fmtCost(e.predicted.total_cost)}</td>
+                  <td className="py-2 pr-3 font-mono">{e.actual ? fmtCost(e.actual.total_cost) : "—"}</td>
+                  <td className="py-2 pr-3 font-mono">{fmt(e.predicted.input_tokens)}</td>
+                  <td className="py-2 pr-3 font-mono">{e.actual ? fmt(e.actual.input_tokens) : "—"}</td>
+                  <td className="py-2 pr-3 font-mono">{fmt(e.predicted.output_tokens)}</td>
+                  <td className="py-2 pr-3 font-mono">{e.actual ? fmt(e.actual.output_tokens) : "—"}</td>
+                  <td className={`py-2 pr-3 font-mono font-medium ${pctColor(e.accuracy?.cost_error_pct ?? null)}`}>
                     {e.accuracy?.cost_error_pct !== null && e.accuracy?.cost_error_pct !== undefined
                       ? `${e.accuracy.cost_error_pct > 0 ? "+" : ""}${e.accuracy.cost_error_pct}%`
                       : "—"}
