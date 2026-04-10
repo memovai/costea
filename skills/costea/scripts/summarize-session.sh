@@ -60,18 +60,10 @@ _summarize_one() {
   project_path=$(head -1 "$dir/session.jsonl" 2>/dev/null | jq -r '.cwd // ""' 2>/dev/null || echo "")
   source_platform=$(head -1 "$dir/session.jsonl" 2>/dev/null | jq -r '.source // "claude-code"' 2>/dev/null || echo "claude-code")
 
-  # Fallback to llm-calls.jsonl if session.jsonl is empty
+  # Timestamps from llm-calls if session.jsonl empty
   if [[ "$started_at" == "N/A" || -z "$started_at" ]]; then
-    started_at=$(head -1 "$dir/llm-calls.jsonl" 2>/dev/null | jq -r '.timestamp // "N/A"' 2>/dev/null || echo "N/A")
-    ended_at=$(tail -1 "$dir/llm-calls.jsonl" 2>/dev/null | jq -r '.timestamp // "N/A"' 2>/dev/null || echo "N/A")
-  fi
-  if [[ -z "$source_platform" || "$source_platform" == "claude-code" ]]; then
-    # Double-check from llm-calls if session.jsonl was empty (0 lines)
-    local _llm_source
-    _llm_source=$(head -1 "$dir/llm-calls.jsonl" 2>/dev/null | jq -r '.source // ""' 2>/dev/null || echo "")
-    if [[ -n "$_llm_source" ]]; then
-      source_platform="$_llm_source"
-    fi
+    started_at=$(jq -r '.timestamp // "N/A"' "$dir/llm-calls.jsonl" 2>/dev/null | head -1 || echo "N/A")
+    ended_at=$(jq -r '.timestamp' "$dir/llm-calls.jsonl" 2>/dev/null | tail -1 || echo "N/A")
   fi
 
   # ── Pre-slurp JSONL files into temp JSON arrays ──────────────────────────
