@@ -1,6 +1,6 @@
 {
   "name": "@costea/web",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Costea Web UI — visualize AI agent token costs, session analytics, and cost predictions.",
   "author": {
     "name": "Costea",

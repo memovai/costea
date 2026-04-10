@@ -1,6 +1,6 @@
 {
   "name": "@costea/costea",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Cost prediction for AI agents. Estimate token costs before execution, review spending after.",
   "author": {
     "name": "Costea",
