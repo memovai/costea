@@ -1,6 +1,6 @@
 {
-  "name": "@costea/costeamigo",
-  "version": "1.0.0",
+  "name": "@memov/costeamigo",
+  "version": "1.0.2",
   "description": "Historical token consumption report across OpenClaw, Claude Code, and Codex CLI.",
   "author": {
     "name": "Costea",
@@ -23,9 +23,13 @@
     "openclaw",
     "skill"
   ],
+  "bin": {
+    "costeamigo": "bin/install.js"
+  },
   "files": [
     "SKILL.md",
-    "scripts"
+    "scripts",
+    "bin"
   ],
   "main": "SKILL.md",
   "skills": ["SKILL.md"],
