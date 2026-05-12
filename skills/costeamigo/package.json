@@ -1,6 +1,6 @@
 {
   "name": "@memov/costeamigo",
-  "version": "1.0.3",
+  "version": "0.0.0",
   "description": "Historical token consumption report across OpenClaw, Claude Code, and Codex CLI.",
   "author": {
     "name": "Costea",
