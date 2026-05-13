@@ -163,17 +163,20 @@ $turns[] |
   .prompt as $raw   |
   .msgs   as $msgs  |
 
-  # Dedup assistant messages with usage by message.id.
-  # Group by id; first in group = authoritative for token counts.
-  # Collect all tool_use blocks across all siblings in the group.
+  # Dedup assistant messages by (message.id, requestId) — Claude Code splits
+  # one API response into multiple rows (thinking/text/tool_use blocks), each
+  # row carrying a cumulative usage snapshot. Same (msg_id, req_id) = same call;
+  # different req_id with same msg_id = different API calls (sidechain / resume)
+  # and must NOT be merged. Within a group, pick the row with max output_tokens
+  # — that's the final snapshot. Tool blocks are still collected across all rows.
   ($msgs
     | map(select(.message.usage != null))
     | group_by(
-        .message.id //
-        ("_noid_" + (.timestamp // "") + (. | tojson | length | tostring))
+        (.message.id // ("_noid_" + (.timestamp // "") + (. | tojson | length | tostring)))
+        + ":" + (.requestId // "_noreq_")
       )
     | map({
-        f:     .[0],
+        f:     max_by(.message.usage.output_tokens // 0),
         tools: [.[].message.content[]? | select(.type == "tool_use")],
         n:     length
       })
@@ -362,7 +365,8 @@ if [[ -d "$SUBAGENT_DIR" ]]; then
       --argjson prices "$COSTEA_PRICES" \
       "$COSTEA_JQ_FUNS"'
       [.[] | select(.type == "assistant" and .message.usage != null)] |
-      group_by(.message.id // "_noid") | map(.[0]) as $dd |
+      group_by((.message.id // "_noid") + ":" + (.requestId // "_noreq")) |
+      map(max_by(.message.usage.output_tokens // 0)) as $dd |
       ($dd[0].message.model // "unknown") as $m0 |
       {
         llm_call_count: ($dd | length),

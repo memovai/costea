@@ -20,6 +20,11 @@ if ! command -v jq &>/dev/null; then
   exit 1
 fi
 
+# Load shared price table + jq helpers (mcost, normalize_model, r6)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/cost.sh
+source "$SCRIPT_DIR/lib/cost.sh"
+
 TASKS_FILE=$(mktemp /tmp/costea_tasks.XXXXXX)
 trap 'rm -f "$TASKS_FILE"' EXIT
 echo '[]' > "$TASKS_FILE"
@@ -123,32 +128,71 @@ process_openclaw() {
 process_claude_code() {
   [[ ! -d "$CLAUDE_PROJECTS" ]] && return
 
+  # Tolerate per-entry non-zero exits (find/jq/test on missing/empty inputs)
+  # without aborting the whole index build. Errors that matter still surface
+  # via merge_tasks accepting "[]" or empty stream.
+  set +e
+  trap 'set -e' RETURN
+
   echo "  Scanning Claude Code..." >&2
 
-  # Find all session JSONL files (skip subagent files)
-  while IFS= read -r jsonl_file; do
-    [[ ! -f "$jsonl_file" ]] && continue
-    local basename
-    basename=$(basename "$jsonl_file" .jsonl)
-    # Skip non-UUID filenames
-    [[ ! "$basename" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && continue
+  # Process an entry which is either:
+  #   - a main session jsonl: <project>/<UUID>.jsonl  (file)
+  #   - an orphan subagent dir: <project>/<UUID>/subagents  (directory; main jsonl gone)
+  while IFS= read -r entry; do
+    local jsonl_file="" sid="" orphan=false subagent_dir=""
+    if [[ -f "$entry" ]]; then
+      jsonl_file="$entry"
+      sid=$(basename "$jsonl_file" .jsonl)
+      [[ ! "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && continue
+      subagent_dir="$(dirname "$jsonl_file")/${sid}/subagents"
+    elif [[ -d "$entry" ]]; then
+      # orphan subagent dir: parent name is the session UUID
+      sid=$(basename "$(dirname "$entry")")
+      [[ ! "$sid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] && continue
+      # Skip if a main jsonl actually exists (will be processed via the file branch)
+      [[ -f "$(dirname "$entry")/${sid}.jsonl" ]] && continue
+      subagent_dir="$entry"
+      orphan=true
+    else
+      continue
+    fi
 
     sessions_scanned=$((sessions_scanned + 1))
-    local sid="$basename"
 
-    # Also scan subagent files for this session to get their token usage
-    local subagent_tokens=0
-    local subagent_dir
-    subagent_dir="$(dirname "$jsonl_file")/${sid}/subagents"
+    # Collect subagent jsonl files (each contains additional assistant messages
+    # belonging to this main session — Task tool invocations, etc.). Merge their
+    # *assistant* records into the same jq stream so they flow through the same
+    # dedup + per-task aggregation. Subagent files also contain a type=user row
+    # at the top (the prompt the main agent sent to the subagent) — that must NOT
+    # open a new task, so we filter those out here. ccusage counts these tokens.
+    local subagent_stream=""
     if [[ -d "$subagent_dir" ]]; then
-      subagent_tokens=$(find "$subagent_dir" -name "agent-*.jsonl" -exec jq -c 'select(.type == "assistant") | .message.usage' {} + 2>/dev/null | \
-        jq -s '[.[] | ((.input_tokens // 0) + (.output_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0))] | add // 0' 2>/dev/null) || true
-      subagent_tokens=${subagent_tokens:-0}
+      subagent_stream=$(find "$subagent_dir" -name "agent-*.jsonl" -exec jq -c 'select(.type == "assistant")' {} + 2>/dev/null || true)
+    fi
+
+    # For orphan sessions (main jsonl deleted but subagents still present), inject
+    # a synthetic user message so the reducer opens at least one task to hold the
+    # subagent assistant messages. Without this, every assistant row would fall
+    # into the "no current_task" branch and be dropped.
+    local synthetic_user=""
+    if [[ "$orphan" == true ]]; then
+      local first_ts
+      first_ts=$(find "$subagent_dir" -name "agent-*.jsonl" -exec jq -r 'select(.timestamp) | .timestamp' {} + 2>/dev/null | sort | head -1)
+      synthetic_user=$(jq -nc --arg ts "${first_ts:-1970-01-01T00:00:00Z}" --arg sid "$sid" \
+        '{type:"user", timestamp:$ts, message:{content:("(orphan subagent session " + $sid + ")")}}')
     fi
 
     local tasks
-    tasks=$(jq -s --arg sid "$sid" --argjson sub_tokens "${subagent_tokens:-0}" '
+    tasks=$({
+      if [[ -n "$jsonl_file" ]]; then cat "$jsonl_file"; fi
+      if [[ -n "$synthetic_user" ]]; then printf '%s\n' "$synthetic_user"; fi
+      if [[ -n "$subagent_stream" ]]; then printf '%s\n' "$subagent_stream"; fi
+    } | jq -s --arg sid "$sid" --argjson prices "$COSTEA_PRICES" "$COSTEA_JQ_FUNS"'
       # Claude Code: type field is "user"/"assistant"/"system"/"progress"/etc
+      # Sort by timestamp so subagent assistant messages (concatenated from sibling
+      # jsonl files) interleave correctly into the right user-message task window.
+      sort_by(.timestamp // "") |
       [.[] | select(.type == "user" or .type == "assistant")] |
 
       reduce .[] as $msg ({ tasks: [], current_task: null };
@@ -173,8 +217,20 @@ process_claude_code() {
         (if $is_skill then .user_message | capture("^/(?<name>[a-zA-Z0-9_-]+)") | .name else null end) as $skill_name |
         (if $is_skill then .user_message | gsub("^/[a-zA-Z0-9_-]+\\s*"; "") else .user_message end) as $prompt |
 
-        # Filter assistant messages with usage data
-        (.assistant_messages | map(select(.message.usage != null))) as $um |
+        # Filter assistant messages with usage data, then dedup by (messageId, requestId).
+        # Claude Code splits one API response into multiple rows (thinking/text/tool_use
+        # content blocks), each carrying a cumulative usage snapshot. Only the row with
+        # the largest output_tokens is the final snapshot — pick that as the group rep.
+        # Different requestId with same messageId = different API calls (sidechain /
+        # resume) and must NOT be merged.
+        (.assistant_messages
+          | map(select(.message.usage != null))
+          | group_by(
+              (.message.id // ("_noid_" + (.timestamp // "") + (. | tojson | length | tostring)))
+              + ":" + (.requestId // "_noreq_")
+            )
+          | map(max_by(.message.usage.output_tokens // 0))
+        ) as $um |
 
         {
           source: "claude-code", session_id: .session_id,
@@ -186,12 +242,19 @@ process_claude_code() {
             output: ([$um[].message.usage.output_tokens // 0] | add // 0),
             cache_read: ([$um[].message.usage.cache_read_input_tokens // 0] | add // 0),
             cache_write: ([$um[].message.usage.cache_creation_input_tokens // 0] | add // 0),
-            total: ([$um[] | .message.usage | ((.input_tokens // 0) + (.output_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0))] | add // 0),
-            subagent_tokens: $sub_tokens
+            total: ([$um[] | .message.usage | ((.input_tokens // 0) + (.output_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0))] | add // 0)
           },
           cost: {
-            # Claude Code does not store per-message cost; will be estimated by LLM
-            total: 0
+            # Computed per-task from LiteLLM pricing (lib/litellm-prices.json) via mcost().
+            total: (
+              mcost(
+                ($um[0].message.model // "unknown");
+                ([$um[].message.usage.input_tokens // 0] | add // 0);
+                ([$um[].message.usage.output_tokens // 0] | add // 0);
+                ([$um[].message.usage.cache_read_input_tokens // 0] | add // 0);
+                ([$um[].message.usage.cache_creation_input_tokens // 0] | add // 0)
+              ) | r6
+            )
           },
           tools: (
             [$um[] | .message.content[]? | select(.type == "tool_use") | .name] |
@@ -210,10 +273,15 @@ process_claude_code() {
           }
         }
       ) | map(select(.assistant_message_count > 0))
-    ' "$jsonl_file" < /dev/null 2>/dev/null) || true
+    ' 2>/dev/null) || true
 
     merge_tasks "$tasks"
-  done < <(find "$CLAUDE_PROJECTS" -maxdepth 2 -name "*.jsonl" -not -path "*/subagents/*" 2>/dev/null)
+  done < <(
+    # main session jsonl files
+    find "$CLAUDE_PROJECTS" -maxdepth 2 -name "*.jsonl" -not -path "*/subagents/*" 2>/dev/null
+    # orphan subagent dirs (main session jsonl already cleaned up)
+    find "$CLAUDE_PROJECTS" -mindepth 3 -maxdepth 3 -type d -name "subagents" 2>/dev/null
+  )
 }
 
 # ─────────────────────────────────────────────
@@ -235,7 +303,7 @@ process_codex() {
     sid=$(basename "$jsonl_file" .jsonl | sed 's/^rollout-//')
 
     local tasks
-    tasks=$(jq -s --arg sid "$sid" '
+    tasks=$(jq -s --arg sid "$sid" --argjson prices "$COSTEA_PRICES" "$COSTEA_JQ_FUNS"'
       # Extract session metadata
       ((.[] | select(.type == "session_meta") | .payload) // {}) as $meta |
 
@@ -258,25 +326,27 @@ process_codex() {
       # Build tasks: for Codex, typically one user message per session = one task
       if ($user_msgs | length) == 0 then []
       else
+        ($meta.model // "gpt-5.2-codex") as $codex_model |
+        (if $token_total then {
+          input: ($token_total.input_tokens // 0),
+          output: ($token_total.output_tokens // 0),
+          cache_read: ($token_total.cached_input_tokens // 0),
+          cache_write: 0,
+          total: ($token_total.total_tokens // 0),
+          reasoning_output: ($token_total.reasoning_output_tokens // 0)
+        } else {
+          input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0
+        } end) as $tu |
         [$user_msgs | to_entries[] | {
           source: "codex", session_id: $sid,
-          model: ($meta.model // "gpt-5.2-codex"), provider: "openai",
+          model: $codex_model, provider: "openai",
           timestamp: .value.timestamp,
           is_skill: false, skill_name: null,
           user_prompt: (.value.text[:500]),
-          token_usage: (
-            if $token_total then {
-              input: ($token_total.input_tokens // 0),
-              output: ($token_total.output_tokens // 0),
-              cache_read: ($token_total.cached_input_tokens // 0),
-              cache_write: 0,
-              total: ($token_total.total_tokens // 0),
-              reasoning_output: ($token_total.reasoning_output_tokens // 0)
-            } else {
-              input: 0, output: 0, cache_read: 0, cache_write: 0, total: 0
-            } end
-          ),
-          cost: { total: 0 },
+          token_usage: $tu,
+          cost: {
+            total: (mcost($codex_model; $tu.input; $tu.output; $tu.cache_read; $tu.cache_write) | r6)
+          },
           tools: ($tool_names | group_by(.) | map({name: .[0], count: length}) | sort_by(-.count)),
           total_tool_calls: ($tool_names | length),
           assistant_message_count: ($agent_msgs | length),

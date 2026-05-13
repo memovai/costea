@@ -2,3 +2,7 @@ references
 skills/costea/.npmrc
 web/package-lock.json
 web/.npmrc
+
+# Vendored upstream source for local reference (e.g. cloning ccusage to read
+# its pricing logic). Not part of this repo's build artifacts.
+ccusage/
